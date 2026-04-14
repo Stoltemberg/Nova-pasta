@@ -97,6 +97,15 @@ class OrbwalkerConfig:
     SCREEN_CAPTURE_COMPENSATION = 0.008  # ~8ms
 
 
+# ─────────────────────────── Auto Summoner ───────────────────────────
+class AutoSummonerConfig:
+    ENABLED = True
+    HEAL_KEY = "2"
+    BARRIER_KEY = "d"
+    ACTIVATION_HP_PERCENT = 0.15  # 15%
+    COOLDOWN = 120.0  # Secs
+
+
 # ─────────────────────────── Riot API ───────────────────────────
 class RiotAPIConfig:
     BASE_URL = "https://127.0.0.1:2999/liveclientdata"

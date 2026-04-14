@@ -136,6 +136,10 @@ class ExternalOrbwalker:
         self._lasthit_held = False
         self._laneclear_held = False
 
+        # ── Módulos Extras ──
+        from auto_summoner import AutoSummoner
+        self.auto_summoner = AutoSummoner(self.riot_api)
+
     def start(self, blocking=True):
         print(BANNER)
 
@@ -146,6 +150,9 @@ class ExternalOrbwalker:
         while not self.riot_api.connected:
             time.sleep(0.5)
         logger.info("✓ Conectado à API do jogo!")
+        
+        # ═══ Iniciar Auto-Summoner ═══
+        self.auto_summoner.start()
 
         # ═══ 2. Identificar campeão ═══
         logger.info("Identificando campeão...")
