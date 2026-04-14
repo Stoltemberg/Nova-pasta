@@ -25,11 +25,12 @@ class OrbwalkerUI(ctk.CTk):
         super().__init__()
 
         self.title("External Orbwalker — Vision AI")
-        self.geometry("450x550")
+        self.geometry("450x720")
         self.resizable(False, False)
         
         # Modo Flutuante (Sempre por cima do jogo)
         self.attributes("-topmost", True)
+        self.is_hidden = False
         
         # Objeto principal do BOT
         self.bot = None
@@ -37,7 +38,10 @@ class OrbwalkerUI(ctk.CTk):
         
         # Variáveis de Interface
         self.var_yolo = ctk.BooleanVar(value=VisionConfig.YOLO_ENABLED)
+        self.var_yolo_fallback = ctk.BooleanVar(value=VisionConfig.YOLO_FALLBACK_ONLY)
         self.var_ping = ctk.DoubleVar(value=OrbwalkerConfig.PING_OFFSET_MS)
+        self.var_windup = ctk.DoubleVar(value=OrbwalkerConfig.WINDUP_BUFFER * 1000) # ms
+        self.var_humanizer = ctk.DoubleVar(value=OrbwalkerConfig.HUMANIZER_MAX * 1000) # ms
         
         self._build_ui()
         self._updater_loop()
@@ -87,42 +91,85 @@ class OrbwalkerUI(ctk.CTk):
         self.card_settings.pack(fill="both", expand=True, padx=20, pady=5)
         
         lbl_settings_tit = ctk.CTkLabel(self.card_settings, text="Painel de Configurações", font=ctk.CTkFont(size=14, weight="bold"))
-        lbl_settings_tit.pack(pady=(10, 15))
-
-        # Switch YOLO
+        lbl_settings_tit.pack(pady=(10, 5))
+        
+        # YOLO Toggles
+        self.frame_yolo = ctk.CTkFrame(self.card_settings, fg_color="transparent")
+        self.frame_yolo.pack(fill="x", padx=10, pady=5)
+        
         self.sw_yolo = ctk.CTkSwitch(
-            self.card_settings, text="Habilitar Cérebro Artificial (YOLO)",
+            self.frame_yolo, text="Cérebro Artificial (YOLO)",
             variable=self.var_yolo, command=self._on_yolo_toggle,
             progress_color="#2ecc71"
         )
-        self.sw_yolo.pack(pady=5, padx=20, anchor="w")
+        self.sw_yolo.pack(side="left", padx=10)
+
+        self.sw_fallback = ctk.CTkSwitch(
+            self.frame_yolo, text="YOLO Apenas no Fallback",
+            variable=self.var_yolo_fallback, command=self._on_fallback_toggle,
+            progress_color="#f39c12"
+        )
+        self.sw_fallback.pack(side="right", padx=10)
 
         # Slider Ping
         self.lbl_ping = ctk.CTkLabel(self.card_settings, text=f"Compensação de Ping: {int(self.var_ping.get())} ms")
-        self.lbl_ping.pack(pady=(15, 0), padx=20, anchor="w")
-        
-        self.sl_ping = ctk.CTkSlider(
-            self.card_settings, from_=0, to=150,
-            variable=self.var_ping, command=self._on_ping_changed
-        )
+        self.lbl_ping.pack(pady=(5, 0), padx=20, anchor="w")
+        self.sl_ping = ctk.CTkSlider(self.card_settings, from_=0, to=150, variable=self.var_ping, command=self._on_ping_changed)
         self.sl_ping.pack(fill="x", padx=20, pady=5)
+
+        # Slider Windup Buffer
+        self.lbl_windup = ctk.CTkLabel(self.card_settings, text=f"Atraso de Transição (Windup): {int(self.var_windup.get())} ms")
+        self.lbl_windup.pack(pady=(5, 0), padx=20, anchor="w")
+        self.sl_windup = ctk.CTkSlider(self.card_settings, from_=0, to=150, variable=self.var_windup, command=self._on_windup_changed)
+        self.sl_windup.pack(fill="x", padx=20, pady=5)
+
+        # Slider Humanizer
+        self.lbl_humanizer = ctk.CTkLabel(self.card_settings, text=f"Lerdeza do Clique (Humanizer): {int(self.var_humanizer.get())} ms")
+        self.lbl_humanizer.pack(pady=(5, 0), padx=20, anchor="w")
+        self.sl_humanizer = ctk.CTkSlider(self.card_settings, from_=0, to=60, variable=self.var_humanizer, command=self._on_human_changed)
+        self.sl_humanizer.pack(fill="x", padx=20, pady=5)
 
         # ── INICIAR BOTÃO ──
         self.btn_run = ctk.CTkButton(
             self, text="INJETAR ORBWALKER NO JOGO", height=45, fg_color="#e67e22", hover_color="#d35400",
             font=ctk.CTkFont(size=14, weight="bold"), command=self.toggle_bot
         )
-        self.btn_run.pack(pady=20, padx=20, fill="x")
+        self.btn_run.pack(pady=10, padx=20, fill="x")
+        
+        self.lbl_cloak = ctk.CTkLabel(self, text="Dica: Pressione [INSERT] no jogo para esconder essa tela.", text_color="gray", font=ctk.CTkFont(size=11))
+        self.lbl_cloak.pack(pady=(0, 10))
+
+    def toggle_visibility(self, event=None):
+        if not self.is_hidden:
+            self.withdraw()  # Esconde a janela nativamente
+            self.is_hidden = True
+            print("UI Ocultada. (Aperte Insert para retornar)")
+        else:
+            self.deiconify() # Mostra novamente a janela
+            self.is_hidden = False
+            print("UI Retornou para a tela.")
 
     def _on_yolo_toggle(self):
-        """Atualiza a Flag global para a Visão YOLO desativar em tempo real."""
         VisionConfig.YOLO_ENABLED = self.var_yolo.get()
-        # Poderiamos salvar_settings() aqui para persistir.
+
+    def _on_fallback_toggle(self):
+        VisionConfig.YOLO_FALLBACK_ONLY = self.var_yolo_fallback.get()
 
     def _on_ping_changed(self, value):
         ms = int(value)
         self.lbl_ping.configure(text=f"Compensação de Ping: {ms} ms")
         OrbwalkerConfig.PING_OFFSET_MS = ms
+
+    def _on_windup_changed(self, value):
+        ms = int(value)
+        self.lbl_windup.configure(text=f"Atraso de Transição (Windup): {ms} ms")
+        OrbwalkerConfig.WINDUP_BUFFER = ms / 1000.0
+
+    def _on_human_changed(self, value):
+        ms = int(value)
+        self.lbl_humanizer.configure(text=f"Lerdeza do Clique (Humanizer): {ms} ms")
+        OrbwalkerConfig.HUMANIZER_MAX = ms / 1000.0
+        OrbwalkerConfig.HUMANIZER_MIN = max(0, (ms - 10) / 1000.0)
 
     def toggle_bot(self):
         """Inicia ou Para as threads do bot."""
@@ -197,9 +244,16 @@ class OrbwalkerUI(ctk.CTk):
         """Ao fechar a janela, matar o bot"""
         if self.bot:
             self.bot._shutdown()
+        import keyboard
+        try:
+            keyboard.unhook_all()
+        except:
+            pass
         self.destroy()
 
 if __name__ == "__main__":
+    import keyboard
     app = OrbwalkerUI()
     app.protocol("WM_DELETE_WINDOW", app.on_closing)
+    keyboard.on_press_key("insert", app.toggle_visibility)
     app.mainloop()

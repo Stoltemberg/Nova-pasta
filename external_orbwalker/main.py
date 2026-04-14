@@ -50,6 +50,26 @@ def convert_entity_to_yolo_class(entity_type) -> int:
 def save_training_data_in_background(frame, entities, width, height, base_dir=None):
     """Salva a imagem do jogo e a anotação .txt em formato YOLO sem bloquear a thread."""
     try:
+        # Filtro Rigoroso Primário (Anti-Bolo/Overlap)
+        import math
+        valid_entities = []
+        for i, e in enumerate(entities):
+            has_overlap = False
+            # Verifica colisão euclidiana (Caixas muito juntas)
+            for j, other_e in enumerate(entities):
+                if i != j:
+                    dist = math.hypot(e.screen_x - other_e.screen_x, e.screen_y - other_e.screen_y)
+                    if dist < 45.0: # ~45px de zona morta para overlap (bolo)
+                        has_overlap = True
+                        break
+            
+            if not has_overlap and e.confidence >= 0.90:
+                valid_entities.append(e)
+
+        # Se depois do filtro nenhuma entidade sobrou isolada, joga o frame fora
+        if not valid_entities:
+            return
+
         timestamp = time.time()
         if base_dir is None:
             base_dir = os.path.dirname(os.path.abspath(__file__))
@@ -60,32 +80,30 @@ def save_training_data_in_background(frame, entities, width, height, base_dir=No
         os.makedirs(os.path.dirname(img_name), exist_ok=True)
         os.makedirs(os.path.dirname(lbl_name), exist_ok=True)
         
-        # 1. Salvar imagem JPG (qualidade alta o suficiente, tamanho leve)
+        # 1. Salvar imagem JPG
         cv2.imwrite(img_name, frame, [cv2.IMWRITE_JPEG_QUALITY, 95])
         
         # 2. Gerar Labels da YOLO
         with open(lbl_name, "w") as f:
-            for e in entities:
+            for e in valid_entities:
                 hb = e.health_bar
                 if hb is None: continue
-                # Filtro de qualidade: Apenas labels de altissima confiança
-                if e.confidence < 0.90: continue
                 
-                # Estimativa do Bounding Box baseada na Health Bar
+                # Estimativa do Bounding Box (A base tem Aspect Ratio de Vertical Retângulo - Padrão LoL)
                 body_w = hb.width * 1.5
                 body_h = hb.width * 2.0
                 
-                # Coordenadas YOLO: centro_x, centro_y, largura, altura (Tudo de 0 a 1)
+                # Coordenadas YOLO normalizadas
                 norm_x = e.screen_x / width
                 norm_y = (e.screen_y + hb.height) / height 
                 norm_w = body_w / width
                 norm_h = body_h / height
                 
-                # Limites absolutos de borda
-                norm_x = max(0.0, min(1.0, norm_x))
-                norm_y = max(0.0, min(1.0, norm_y))
-                norm_w = max(0.0, min(1.0, norm_w))
-                norm_h = max(0.0, min(1.0, norm_h))
+                # Filtro de Clipping (Ignorar se o Bounding Box vazar fisicamente da tela)
+                if norm_x - (norm_w/2) < 0.01 or norm_x + (norm_w/2) > 0.99:
+                    continue
+                if norm_y - (norm_h/2) < 0.01 or norm_y + (norm_h/2) > 0.99:
+                    continue
                 
                 yolo_class = convert_entity_to_yolo_class(e.entity_type)
                 f.write(f"{yolo_class} {norm_x:.6f} {norm_y:.6f} {norm_w:.6f} {norm_h:.6f}\n")
