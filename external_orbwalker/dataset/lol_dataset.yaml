@@ -1,0 +1,21 @@
+# ──────────────────────────────────────────────────
+# Dataset config para treinar YOLOv8 no League of Legends
+# ──────────────────────────────────────────────────
+
+# Caminho ABSOLUTO para a pasta dataset/ do projeto
+# Ajuste este caminho para o seu sistema:
+path: C:/Users/Administrator/Desktop/Nova pasta/external_orbwalker/dataset
+
+train: images/train
+val: images/val
+
+# ──────────── Classes ────────────
+# 5 classes de entidades do jogo
+nc: 5
+
+names:
+  0: enemy_champion
+  1: enemy_minion
+  2: enemy_turret
+  3: ally_minion
+  4: jungle_monster

@@ -1,0 +1,11 @@
+dxcam>=0.3.0
+opencv-python>=4.8.0
+numpy>=1.24.0
+requests>=2.31.0
+keyboard>=0.13.5
+psutil>=5.9.0
+mss>=9.0.0
+Pillow>=10.0.0
+# Opcional (só se for treinar YOLO):
+# ultralytics>=8.0.0
+# orjson>=3.9.0
