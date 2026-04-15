@@ -17,17 +17,17 @@ class TargetSelector:
 
     # Fator de conversão: unidades de range do LoL → pixels na tela.
     # Em LoL@1080p câmera travada, ~1 unidade ≈ 0.85 pixel na profundidade Y.
-    # Usamos 0.85 como base; se ainda flickar, reduzir para 0.75.
-    RANGE_TO_PIXEL_FACTOR = 0.85
+    # Usamos 0.85 como base; reduzido para 0.75 para evitar flickering.
+    RANGE_TO_PIXEL_FACTOR = 0.75
 
     # Margem de tolerância além do range (evita dropouts na borda)
-    RANGE_BUFFER_PX = 60
+    RANGE_BUFFER_PX = 40
 
     # Hysteresis: alvo selecionado só é descartado quando sai do range * HYSTERESIS_FACTOR
     # Evita flickering quando o alvo fica oscilando na borda do range
-    HYSTERESIS_FACTOR = 1.20
+    HYSTERESIS_FACTOR = 1.25
 
-    def __init__(self, screen_width: int = 1920, screen_height: int = 1080):
+    def __init__(self, screen_width: int = 2560, screen_height: int = 1080):
         self.screen_width = screen_width
         self.screen_height = screen_height
         self.screen_center_x = screen_width // 2

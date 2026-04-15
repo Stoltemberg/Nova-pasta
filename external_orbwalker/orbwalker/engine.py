@@ -257,7 +257,7 @@ class OrbwalkerEngine:
                         saved_cursor = (point.x, point.y)
                         
                         # Mover com Bézier em vez de teleporte instantâneo
-                        self.humanizer.move_cursor_bezier(point.x, point.y, vision_target[0], vision_target[1], steps=12)
+                        self.humanizer.move_cursor_bezier(point.x, point.y, vision_target[0], vision_target[1], steps=5)
 
                 # ── Attack input: A + Left Click (idêntico ao auto-kite-bot) ──
                 # Usamos a nova função humanizada com pequeno delay (5-15ms)
