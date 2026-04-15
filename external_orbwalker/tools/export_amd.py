@@ -1,13 +1,21 @@
 import os
-from ultralytics import YOLO
+import sys
 
-def export_to_amd_format(pt_path="runs/detect/lol_orbwalker/weights/best.pt"):
+# Permitir execução direta de dentro de tools/
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+
+from ultralytics import YOLO
+from config import VisionConfig
+
+def export_to_amd_format(pt_path=None):
     """
     Carrega o modelo treinado em PyTorch (best.pt) e o converte para
     ONNX (Open Neural Network Exchange).
     Esse formato roda de forma nativa e paralela em placas AMD (RX 580)
     usando a API do DirectML, quadruplicando o FPS da visão.
     """
+    if pt_path is None:
+        pt_path = VisionConfig.YOLO_MODEL_PATH
     if not os.path.exists(pt_path):
         print(f"[ERRO] O modelo '{pt_path}' não foi encontrado.")
         print("Treine a sua IA primeiro antes de tentar exportá-la para AMD!")

@@ -33,6 +33,7 @@ class RiotAPI:
         self._raw_champion_name: str = ""
         self._current_health: float = 0.0
         self._max_health: float = 1.0
+        self._attack_range: float = 550.0
         self._level: int = 1
         self._connected: bool = False
 
@@ -90,6 +91,11 @@ class RiotAPI:
         with self._lock:
             return self._connected
 
+    @property
+    def attack_range(self) -> float:
+        with self._lock:
+            return self._attack_range
+
     # ─────────── Lifecycle ───────────
 
     def start(self):
@@ -129,6 +135,7 @@ class RiotAPI:
                     self._attack_speed = float(stats.get("attackSpeed", 0.625))
                     self._current_health = float(stats.get("currentHealth", 0.0))
                     self._max_health = float(stats.get("maxHealth", 1.0))
+                    self._attack_range = float(stats.get("attackRange", 550.0))
                     self._level = int(active_player.get("level", 1))
                     self._connected = True
 

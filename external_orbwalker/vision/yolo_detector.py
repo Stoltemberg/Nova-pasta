@@ -1,7 +1,7 @@
 """
 vision/yolo_detector.py — Detecção de entidades via YOLOv8 (fallback do pipeline híbrido).
 Ativado quando o detector OpenCV falha ou retorna 0 entidades.
-Requer modelo treinado em models/orbwalker_yolo.pt.
+O caminho do modelo é definido em config.py (VisionConfig.YOLO_MODEL_PATH).
 """
 import numpy as np
 import logging

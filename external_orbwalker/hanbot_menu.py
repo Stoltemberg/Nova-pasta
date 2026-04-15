@@ -10,7 +10,9 @@ except ImportError:
 
 from config import VisionConfig, OrbwalkerConfig, AutoSummonerConfig
 from main import ExternalOrbwalker
-from esp_overlay import EspOverlay
+
+# ESP Overlay desativado temporariamente (Tkinter conflita com DearPyGui na main thread).
+# Será reimplementado usando Win32 GDI puro.
 
 class HanbotMenu:
     def __init__(self):
@@ -72,7 +74,9 @@ class HanbotMenu:
             dpg.add_separator()
             dpg.add_text("HOTKEYS DO SISTEMA:", color=(200, 200, 0))
             dpg.add_text("  [SPACE] Segurar: Combo Orbwalk", color=(180, 180, 180))
+            dpg.add_text("  [X] Segurar: Last Hit", color=(180, 180, 180))
             dpg.add_text("  [V] Segurar: Lane Clear", color=(180, 180, 180))
+            dpg.add_text("  [C] Segurar: Harass (LH + Poke)", color=(180, 180, 180))
             dpg.add_text("  [INSERT] Ativar/Desativar Menu", color=(100, 255, 100))
 
         # Viewport de Fundo do OS configurado para grudar e parecer nativo
@@ -161,12 +165,8 @@ class HanbotMenu:
             self.bot.running = True
             
             threading.Thread(target=self.bot.start, args=(False,), daemon=True).start()
-            
-            self.esp = EspOverlay(self.bot)
-            self.esp.start()
         else:
             if self.bot: self.bot._shutdown()
-            if hasattr(self, 'esp'): self.esp.stop()
                 
             dpg.configure_item("btn_run", label=">>> INJETAR MOTOR <<<")
             dpg.configure_item("lbl_status", default_value="STATUS: DESCONECTADO (SEGURO)", color=(255, 100, 100))
@@ -175,11 +175,7 @@ class HanbotMenu:
             dpg.configure_item("lbl_aim", default_value="Nenhum Alvo (Cego)", color=(200,200,200))
 
     def updater_loop(self):
-        # Diferente do CustomTkinter que usa after(), DPG lida bem com loops isolados desde que dpg exista
         while dpg.is_dearpygui_running():
-            if hasattr(self, 'esp') and self.esp is not None:
-                self.esp.draw_frame()
-                
             if self.bot and self.bot.running:
                 # Atualizar Riot API status
                 if self.bot.riot_api.connected:

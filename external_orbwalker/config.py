@@ -5,6 +5,11 @@ import json
 import os
 import logging
 
+# ─────────────────────────── Diretório Base (Dinâmico) ───────────────────────────
+# Todos os caminhos do projeto são relativos a este diretório.
+# Isso garante que mover a pasta do projeto não quebre nada.
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - [%(levelname)s] - %(message)s',
@@ -25,7 +30,7 @@ class Hotkeys:
 # ─────────────────────────── Vision ───────────────────────────
 class VisionConfig:
     # Resolução de referência para calibração dos tamanhos de health bar
-    REFERENCE_WIDTH = 1920
+    REFERENCE_WIDTH = 2560
     REFERENCE_HEIGHT = 1080
 
     # FPS alvo do pipeline de captura
@@ -43,11 +48,13 @@ class VisionConfig:
     MAX_ASPECT_RATIO = 25.0
 
     # ── Tamanhos de health bar em pixels @1080p ──
-    # Estes valores servem como thresholds para classificação
-    CHAMPION_BAR_MIN_WIDTH = 90       # campeões têm barras >= 90px
-    MINION_SIEGE_BAR_MIN_WIDTH = 62   # siege/cannon
-    MINION_BAR_MIN_WIDTH = 25         # minions normais
-    MINION_BAR_MAX_WIDTH = 89         # teto para minion (abaixo = campeão)
+    # IMPORTANTE: A barra vermelha encolhe com HP perdido! Full HP ≈ 103px.
+    # Campeão com 70% HP → porção vermelha ≈ 72px. Com 50% HP → ≈ 52px.
+    # Por isso usamos MÚLTIPLOS sinais (level, mana bar, altura).
+    CHAMPION_BAR_MIN_WIDTH = 75        # Lowered: com HP parcial a barra encolhe
+    MINION_SIEGE_BAR_MIN_WIDTH = 55    # siege/cannon (também pode ser champ com baixo HP)
+    MINION_BAR_MIN_WIDTH = 25          # minions normais
+    MINION_BAR_MAX_WIDTH = 74          # teto para minion (acima disso = provável campeão)
 
     # ── Offset do centro do corpo em relação à health bar ──
     # A health bar fica acima da cabeça; o corpo está ~50px abaixo @1080p
@@ -60,7 +67,7 @@ class VisionConfig:
     LEVEL_CHECK_SIZE = 14        # tamanho da região de check
 
     # ── YOLO Config ──
-    YOLO_MODEL_PATH = "runs/detect/lol_orbwalker/weights/best.pt"  # Apontando para o default file de output do pytorch
+    YOLO_MODEL_PATH = os.path.join(BASE_DIR, "runs", "detect", "lol_orbwalker", "weights", "best.pt")
     YOLO_CONFIDENCE = 0.50
     YOLO_ENABLED = True   # O robô agora tentará ligar o "cérebro neural"
     YOLO_FALLBACK_ONLY = False  # Se False, o YOLO atuará como visão PRINCIPAL, não apenas fallback!
@@ -124,7 +131,7 @@ class CDragonConfig:
 
 
 # ─────────────────────────── Settings Persistence ───────────────────────────
-SETTINGS_DIR = "settings"
+SETTINGS_DIR = os.path.join(BASE_DIR, "settings")
 SETTINGS_FILE = os.path.join(SETTINGS_DIR, "settings.json")
 
 DEFAULT_SETTINGS = {

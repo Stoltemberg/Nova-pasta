@@ -1,20 +1,20 @@
 task: detect
 mode: train
-model: yolov8n.pt
+model: C:\Users\Administrator\Desktop\Nova pasta\external_orbwalker\runs\detect\lol_orbwalker\weights\best.pt
 data: C:\Users\Administrator\Desktop\Nova pasta\external_orbwalker\dataset\lol_dataset.yaml
-epochs: 100
+epochs: 14
 time: null
-patience: 20
+patience: 100
 batch: 16
 imgsz: 640
 save: true
-save_period: 10
+save_period: -1
 cache: false
 device: cpu
 workers: 8
-project: null
+project: C:\Users\Administrator\Desktop\Nova pasta\external_orbwalker\runs\detect
 name: lol_orbwalker
-exist_ok: false
+exist_ok: true
 pretrained: true
 optimizer: auto
 verbose: true
@@ -87,19 +87,19 @@ kobj: 1.0
 rle: 1.0
 angle: 1.0
 nbs: 64
-hsv_h: 0.01
-hsv_s: 0.3
-hsv_v: 0.3
+hsv_h: 0.015
+hsv_s: 0.7
+hsv_v: 0.4
 degrees: 0.0
 translate: 0.1
-scale: 0.3
+scale: 0.5
 shear: 0.0
 perspective: 0.0
 flipud: 0.0
-fliplr: 0.0
+fliplr: 0.5
 bgr: 0.0
-mosaic: 0.5
-mixup: 0.1
+mosaic: 1.0
+mixup: 0.0
 cutmix: 0.0
 copy_paste: 0.0
 copy_paste_mode: flip

@@ -48,67 +48,27 @@ def convert_entity_to_yolo_class(entity_type) -> int:
     return 1  # Default fallback
 
 def save_training_data_in_background(frame, entities, width, height, base_dir=None):
-    """Salva a imagem do jogo e a anotação .txt em formato YOLO sem bloquear a thread."""
+    """
+    Salva a imagem bruta na inbox/ para ser anotada pelo auto-labeler (best.pt).
+    NÃO gera labels estimadas — o auto-labeler usa o modelo treinado para maior precisão.
+    """
     try:
-        # Filtro Rigoroso Primário (Anti-Bolo/Overlap)
-        import math
-        valid_entities = []
-        for i, e in enumerate(entities):
-            has_overlap = False
-            # Verifica colisão euclidiana (Caixas muito juntas)
-            for j, other_e in enumerate(entities):
-                if i != j:
-                    dist = math.hypot(e.screen_x - other_e.screen_x, e.screen_y - other_e.screen_y)
-                    if dist < 45.0: # ~45px de zona morta para overlap (bolo)
-                        has_overlap = True
-                        break
-            
-            if not has_overlap and e.confidence >= 0.90:
-                valid_entities.append(e)
-
-        # Se depois do filtro nenhuma entidade sobrou isolada, joga o frame fora
-        if not valid_entities:
+        # Só captura se houver pelo menos 1 entidade detectada na tela
+        if not entities:
             return
 
-        timestamp = time.time()
         if base_dir is None:
-            base_dir = os.path.dirname(os.path.abspath(__file__))
-            
-        img_name = os.path.join(base_dir, "dataset", "images", "train", f"play_{timestamp:.2f}.jpg")
-        lbl_name = os.path.join(base_dir, "dataset", "labels", "train", f"play_{timestamp:.2f}.txt")
-        
-        os.makedirs(os.path.dirname(img_name), exist_ok=True)
-        os.makedirs(os.path.dirname(lbl_name), exist_ok=True)
-        
-        # 1. Salvar imagem JPG
-        cv2.imwrite(img_name, frame, [cv2.IMWRITE_JPEG_QUALITY, 95])
-        
-        # 2. Gerar Labels da YOLO
-        with open(lbl_name, "w") as f:
-            for e in valid_entities:
-                hb = e.health_bar
-                if hb is None: continue
-                
-                # Estimativa do Bounding Box (A base tem Aspect Ratio de Vertical Retângulo - Padrão LoL)
-                body_w = hb.width * 1.5
-                body_h = hb.width * 2.0
-                
-                # Coordenadas YOLO normalizadas
-                norm_x = e.screen_x / width
-                norm_y = (e.screen_y + hb.height) / height 
-                norm_w = body_w / width
-                norm_h = body_h / height
-                
-                # Filtro de Clipping (Ignorar se o Bounding Box vazar fisicamente da tela)
-                if norm_x - (norm_w/2) < 0.01 or norm_x + (norm_w/2) > 0.99:
-                    continue
-                if norm_y - (norm_h/2) < 0.01 or norm_y + (norm_h/2) > 0.99:
-                    continue
-                
-                yolo_class = convert_entity_to_yolo_class(e.entity_type)
-                f.write(f"{yolo_class} {norm_x:.6f} {norm_y:.6f} {norm_w:.6f} {norm_h:.6f}\n")
-    except Exception as ex:
-        # Silencia erros de I/O para não interferir na gameplay
+            from config import BASE_DIR
+            base_dir = BASE_DIR
+
+        inbox_dir = os.path.join(base_dir, "dataset", "inbox")
+        os.makedirs(inbox_dir, exist_ok=True)
+
+        timestamp = time.time()
+        img_name = os.path.join(inbox_dir, f"play_{timestamp:.2f}.jpg")
+
+        cv2.imwrite(img_name, frame, [cv2.IMWRITE_JPEG_QUALITY, 92])
+    except Exception:
         pass
 
 
@@ -131,10 +91,15 @@ class ExternalOrbwalker:
         self.vision_enabled = VISION_AVAILABLE
         self.vision_thread = None
 
+        # ── Target Selector (com filtro de attack range) ──
+        from orbwalker.target_selector import TargetSelector
+        self.target_selector = TargetSelector()
+
         # ── Key states ──
         self._combo_held = False
         self._lasthit_held = False
         self._laneclear_held = False
+        self._harass_held = False
 
         # ── Módulos Extras ──
         from auto_summoner import AutoSummoner
@@ -202,9 +167,10 @@ class ExternalOrbwalker:
         print()
         logger.info("═" * 50)
         logger.info("ORBWALKER PRONTO!")
-        logger.info("  [SPACE] Segurar = Orbwalk (Combo)")
-        logger.info("  [X]     Segurar = Last Hit")
-        logger.info("  [V]     Segurar = Lane Clear")
+        logger.info("  [SPACE] Segurar = Combo (só campeões)")
+        logger.info("  [X]     Segurar = Last Hit (só minions matáveis)")
+        logger.info("  [V]     Segurar = Lane Clear (tudo)")
+        logger.info("  [C]     Segurar = Harass (last hit + poke campeão)")
         logger.info("  [Ctrl+C] = Sair")
         logger.info("═" * 50)
         print()
@@ -256,6 +222,19 @@ class ExternalOrbwalker:
             elif event.event_type == keyboard.KEY_UP:
                 self._laneclear_held = False
                 if self.engine.mode == "laneclear":
+                    self.engine.active = False
+                    self.engine.clear_vision_target()
+
+        # ── C = Harass (Last Hit + Poke Campeão) ──
+        elif key == 'c':
+            if event.event_type == keyboard.KEY_DOWN:
+                if not self._harass_held:
+                    self._harass_held = True
+                    self.engine.active = True
+                    self.engine.mode = "harass"
+            elif event.event_type == keyboard.KEY_UP:
+                self._harass_held = False
+                if self.engine.mode == "harass":
                     self.engine.active = False
                     self.engine.clear_vision_target()
 
@@ -353,31 +332,21 @@ class ExternalOrbwalker:
                         )
                         save_thread.start()
 
-                    # ── Selecionar alvo baseado no modo ──
+                    # ── Selecionar alvo baseado no modo (com filtro de range) ──
                     mode = self.engine.mode
+
+                    # Atualizar range em tempo real (itens como RFC mudam isso)
+                    self.target_selector.update_attack_range(self.riot_api.attack_range)
+
                     target = None
-                    cx, cy = screen_w // 2, screen_h // 2
-
                     if mode == "combo":
-                        champs = [e for e in entities if e.entity_type == EntityType.CHAMPION]
-                        if champs:
-                            target = min(champs, key=lambda e: ((e.screen_x - cx)**2 + (e.screen_y - cy)**2))
-
+                        target = self.target_selector.select_combo(entities)
                     elif mode == "lasthit":
-                        minions = [e for e in entities if e.entity_type in (EntityType.MINION, EntityType.MINION_SIEGE)]
-                        low_hp = [m for m in minions if m.health_bar.fill_ratio < 0.40]
-                        if low_hp:
-                            target = min(low_hp, key=lambda e: e.health_bar.fill_ratio)
-
+                        target = self.target_selector.select_lasthit(entities)
                     elif mode == "laneclear":
-                        all_targets = [e for e in entities if e.entity_type != EntityType.UNKNOWN]
-                        minions_low = [e for e in all_targets
-                                       if e.entity_type in (EntityType.MINION, EntityType.MINION_SIEGE)
-                                       and e.health_bar.fill_ratio < 0.30]
-                        if minions_low:
-                            target = min(minions_low, key=lambda e: e.health_bar.fill_ratio)
-                        elif all_targets:
-                            target = min(all_targets, key=lambda e: ((e.screen_x - cx)**2 + (e.screen_y - cy)**2))
+                        target = self.target_selector.select_laneclear(entities)
+                    elif mode == "harass":
+                        target = self.target_selector.select_harass(entities)
 
                     # ── Atualizar target no engine ──
                     if target:

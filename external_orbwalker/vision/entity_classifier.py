@@ -36,33 +36,40 @@ class DetectedEntity:
 
 class EntityClassifier:
     """
-    Classifica health bars em tipos de entidade usando:
+    Classifica health bars em tipos de entidade usando múltiplos sinais:
     1. Tamanho da health bar (principal)
-    2. Presença de level indicator (secundário)
-    3. Contexto visual (terciário)
+    2. Presença de level indicator (forte)
+    3. Presença de barra de mana azul abaixo (forte)
+    4. Altura da barra (campeões têm barras ligeiramente mais altas)
+    5. Posição na tela (contexto)
     """
 
     def __init__(self, screen_width: int = 1920, screen_height: int = 1080):
         self.screen_width = screen_width
         self.screen_height = screen_height
-        # LoL UI escala pela ALTURA (mesma fix do HealthBarDetector)
         self.scale = screen_height / VisionConfig.REFERENCE_HEIGHT
 
         # ── Thresholds escalados ──
+        # NOTA: A largura da health bar VERMELHA encolhe com o HP perdido.
+        # Campeão full HP @1080p ≈ 103px, mas com 50% HP a porção vermelha ≈ 52px.
+        # Por isso, width sozinha NÃO é suficiente para classificar.
         self.champ_min_w = int(VisionConfig.CHAMPION_BAR_MIN_WIDTH * self.scale)
         self.siege_min_w = int(VisionConfig.MINION_SIEGE_BAR_MIN_WIDTH * self.scale)
         self.minion_max_w = int(VisionConfig.MINION_BAR_MAX_WIDTH * self.scale)
         self.body_offset = int(VisionConfig.BODY_OFFSET_Y * self.scale)
 
-        # ── Level indicator detection params ──
-        self.level_offset_x = int(VisionConfig.LEVEL_CHECK_OFFSET_X * self.scale)
-        self.level_offset_y = int(VisionConfig.LEVEL_CHECK_OFFSET_Y * self.scale)
-        self.level_check_size = max(8, int(VisionConfig.LEVEL_CHECK_SIZE * self.scale))
+        # ── Level indicator detection params (multi-zone) ──
+        self.level_check_size = max(10, int(16 * self.scale))
+
+        # ── Mana bar detection ──
+        self.mana_check_height = max(3, int(5 * self.scale))
+        self.mana_check_gap = max(1, int(2 * self.scale))  # Gap entre HP bar e mana bar
 
         logger.info(
             f"EntityClassifier initialized | "
             f"Champion bar >= {self.champ_min_w}px | "
-            f"Minion bar <= {self.minion_max_w}px"
+            f"Siege >= {self.siege_min_w}px | "
+            f"Minion max = {self.minion_max_w}px"
         )
 
     def classify(self, frame: np.ndarray, health_bars: list[HealthBar]) -> list[DetectedEntity]:
@@ -82,8 +89,8 @@ class EntityClassifier:
             # ── Verificar presença de level indicator ──
             has_level = self._check_level_indicator(frame, hb)
 
-            # ── Classificar pelo tamanho + level ──
-            entity_type, confidence = self._classify_by_size_and_level(hb, has_level)
+            # ── Classificar pelo tamanho + level + mana ──
+            entity_type, confidence = self._classify_by_size_and_level(frame, hb, has_level)
 
             # ── Estimar posição do corpo ──
             body_x = hb.center_x
@@ -100,76 +107,136 @@ class EntityClassifier:
 
         return entities
 
-    def _classify_by_size_and_level(self, hb: HealthBar, has_level: bool) -> tuple[EntityType, float]:
+    def _classify_by_size_and_level(self, frame: np.ndarray, hb: HealthBar, has_level: bool) -> tuple[EntityType, float]:
         """
-        Classificação baseada no tamanho da barra + presença de nível.
-
-        Returns:
-            (EntityType, confidence)
+        Classificação multi-sinal robusta.
+        
+        Sinais usados (em ordem de peso):
+        1. Largura da barra vermelha (mas CUIDADO: encolhe com HP perdido)
+        2. Level indicator (forte: minions nunca têm)
+        3. Barra de mana azul (forte: minions nunca têm)
+        4. Altura da barra (campeões = 4-5px, minions = 2-3px @1080p)
         """
         w = hb.width
-
-        # ── Campeão: barra larga OU barra média com level ──
+        h = hb.height
+        has_mana = self._check_mana_bar(frame, hb)
+        
+        # ════════════ CAMPEÃO CERTO ════════════
+        # Barra muito larga = campeão indiscutível
         if w >= self.champ_min_w:
             return EntityType.CHAMPION, 0.95
-
-        if has_level and w >= self.siege_min_w:
-            # Barra de tamanho médio mas tem level = provavelmente champion
-            return EntityType.CHAMPION, 0.80
-
-        # ── Minion siege/cannon: barra de tamanho intermediário ──
+        
+        # Level indicator = NUNCA é minion (minions não mostram level)
+        if has_level:
+            return EntityType.CHAMPION, 0.92
+        
+        # Mana bar azul abaixo = NUNCA é minion
+        if has_mana:
+            return EntityType.CHAMPION, 0.90
+        
+        # ════════════ ZONA CINZA (62-89px) ════════════
+        # Pode ser campeão com HP parcial OU siege minion.
+        # Usar altura da barra como desempate.
         if w >= self.siege_min_w:
-            if has_level:
+            # Barras de campeão são ligeiramente mais altas (~4-5px vs ~3px dos minions)
+            bar_height_threshold = max(3, int(4 * self.scale))
+            if h >= bar_height_threshold:
                 return EntityType.CHAMPION, 0.75
-            return EntityType.MINION_SIEGE, 0.85
-
-        # ── Minion normal ──
+            return EntityType.MINION_SIEGE, 0.80
+        
+        # ════════════ MINION CERTO ════════════
+        # Barra pequena, sem level, sem mana = minion
         if w > 0:
-            if has_level:
-                # Barra pequena mas tem level = edge case, favorecemos champion
-                return EntityType.CHAMPION, 0.60
             return EntityType.MINION, 0.90
-
+        
         return EntityType.UNKNOWN, 0.0
 
     def _check_level_indicator(self, frame: np.ndarray, hb: HealthBar) -> bool:
         """
         Verifica se existe um indicador de nível ao lado da health bar.
-        Campeões inimigos têm um pequeno texto de nível (número branco/amarelo)
-        à esquerda da health bar.
-
-        Returns:
-            True se detectou indicador de nível
+        Campeões inimigos têm um número de nível branco/amarelo à esquerda.
+        Minions NUNCA têm isso.
+        
+        Usa múltiplas zonas de verificação para resistir a variações de
+        posição e escala entre campeões diferentes.
         """
-        # Região de verificação: à esquerda da health bar
-        check_x = hb.x + self.level_offset_x
-        check_y = hb.y + self.level_offset_y
+        # ── Zona 1: Imediatamente à esquerda da barra ──
+        # O level text fica ~3-18px à esquerda da borda da barra
         size = self.level_check_size
-
+        
+        # Testar duas posições levemente diferentes (variação entre campeões)
+        check_positions = [
+            (hb.x - size - 2, hb.y - 2),      # Posição padrão
+            (hb.x - size + 2, hb.y - 4),      # Ligeiramente mais perto/acima
+        ]
+        
+        for check_x, check_y in check_positions:
+            if check_x < 0 or check_y < 0:
+                continue
+            if check_x + size >= frame.shape[1] or check_y + size >= frame.shape[0]:
+                continue
+            
+            roi = frame[check_y:check_y + size, check_x:check_x + size]
+            if roi.size == 0:
+                continue
+            
+            # ── Detectar texto branco/amarelo ──
+            # Converter para HSV para diferenciar branco/amarelo de ruído
+            hsv_roi = cv2.cvtColor(roi, cv2.COLOR_BGR2HSV)
+            gray = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
+            
+            # Branco puro (alto brilho, baixa saturação)
+            _, white_thresh = cv2.threshold(gray, 170, 255, cv2.THRESH_BINARY)
+            white_ratio = cv2.countNonZero(white_thresh) / max(gray.size, 1)
+            
+            # Amarelo (hue 20-35, alta saturação) — level enemies em alguns skins
+            yellow_mask = cv2.inRange(hsv_roi, 
+                                      np.array([18, 80, 150], dtype=np.uint8),
+                                      np.array([38, 255, 255], dtype=np.uint8))
+            yellow_ratio = cv2.countNonZero(yellow_mask) / max(gray.size, 1)
+            
+            combined_ratio = white_ratio + yellow_ratio
+            
+            # Level text = ~10-45% de pixels claros na ROI
+            if 0.08 < combined_ratio < 0.55:
+                return True
+        
+        return False
+    
+    def _check_mana_bar(self, frame: np.ndarray, hb: HealthBar) -> bool:
+        """
+        Verifica se existe uma barra de mana azul logo abaixo da health bar.
+        Campeões têm mana bar; minions NÃO.
+        Este é um dos sinais mais confiáveis para diferenciar.
+        """
+        # Região abaixo da health bar
+        mana_x = hb.x
+        mana_y = hb.y + hb.height + self.mana_check_gap
+        mana_w = hb.width
+        mana_h = self.mana_check_height
+        
         # Boundary check
-        if check_x < 0 or check_y < 0:
+        if mana_y + mana_h >= frame.shape[0] or mana_x + mana_w >= frame.shape[1]:
             return False
-        if check_x + size >= frame.shape[1] or check_y + size >= frame.shape[0]:
+        if mana_x < 0 or mana_y < 0:
             return False
-
-        # Extrair região
-        roi = frame[check_y:check_y + size, check_x:check_x + size]
-
+            
+        roi = frame[mana_y:mana_y + mana_h, mana_x:mana_x + mana_w]
         if roi.size == 0:
             return False
-
-        # ── Detectar texto branco/amarelo (nível) ──
-        # Converter para grayscale
-        gray = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
-
-        # Threshold para pixels claros (texto branco/amarelo do nível)
-        _, thresh = cv2.threshold(gray, 180, 255, cv2.THRESH_BINARY)
-
-        # Se há uma quantidade significativa de pixels claros, há texto
-        white_ratio = cv2.countNonZero(thresh) / max(gray.size, 1)
-
-        # Nível tem ~15-35% de pixels brancos na ROI
-        return 0.10 < white_ratio < 0.50
+        
+        # Detectar azul (mana) no HSV
+        hsv_roi = cv2.cvtColor(roi, cv2.COLOR_BGR2HSV)
+        
+        # Azul = hue 90-130, saturação alta, brilho médio-alto
+        blue_mask = cv2.inRange(hsv_roi,
+                                np.array([90, 60, 80], dtype=np.uint8),
+                                np.array([130, 255, 255], dtype=np.uint8))
+        
+        blue_ratio = cv2.countNonZero(blue_mask) / max(roi.size // 3, 1)  # divido por 3 canais
+        
+        # Se >15% dos pixels são azuis, é mana bar
+        return blue_ratio > 0.15
 
     def get_champions(self, entities: list[DetectedEntity]) -> list[DetectedEntity]:
         """Filtra apenas campeões."""
